@@ -1,0 +1,193 @@
+Imports Microsoft.Data.Odbc
+Imports System.Text.RegularExpressions.Regex
+
+Public Class Catalog_Search
+'<SNIP>
+
+    Dim conn As OdbcConnection
+    Dim cmd As OdbcCommand
+    Dim drStudentType As OdbcDataReader
+    Public mCriteria As String
+    Public mCurriculum_id As String = ""
+
+    Private Sub Page_Load(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles MyBase.Load
+        sql = "Select * from search_by_Curriculum ORDER BY coursetitle WHERE currid='17' "
+
+        'Put user code to initialize the page here
+        If Not IsPostBack Then
+            conn = getODBCconnection("OCTA_training")
+            conn.Open()
+            Dim cmd As OdbcCommand
+            Dim dr As OdbcDataReader
+
+            LoadCurriculum()
+            LoadTargetStudent()
+
+            ' TEST QuickLinks - These are preset querystring, search criteria, included in the url.
+            If Request.QueryString.Count <> 0 Then
+                HandleQueryString()
+            End If
+
+        End If
+    End Sub
+
+    Private Function LoadCurriculum()
+        ' Purpose:  Loads the Curriculum drop down list with entries from the database
+        '-----------------------------------------------------------------------------
+        Dim dsCurriculum As DataSet
+        dsCurriculum = getDataSet("curriculum", "SELECT TOP 100 PERCENT * FROM dbo.Curriculum ORDER BY CurrDesc")
+
+        Dim dr As DataRow
+        ddCurriculum.Items.Add(New ListItem("<-- Select Curriculum -->", "-1"))
+        For Each dr In dsCurriculum.Tables("curriculum").Rows
+            ddCurriculum.Items.Add(New ListItem(dr("currdesc"), dr("currid")))
+        Next
+    End Function
+
+    Private Function LoadTargetStudent()
+        ' Purpose:  Loads the Student Type drop down list with entries from the database
+        '-----------------------------------------------------------------------------
+        Dim dsTargetStudent As DataSet
+        dsTargetStudent = getDataSet("targetStudent", "select * from StudentType ORDER BY studtypedesc")
+        Dim dr As DataRow
+        ddTargetStudent_Type.Items.Add(New ListItem("<-- Select Target Student -->", "-1"))
+        For Each dr In dsTargetStudent.Tables("TargetStudent").Rows
+            ddTargetStudent_Type.Items.Add(New ListItem(dr("studtypedesc"), dr("studtypeid")))
+        Next
+    End Function
+
+    Private Function getDataSet(ByVal tbl As String, ByVal sql As String) As DataSet
+        Dim ds As New DataSet
+        Dim conn As OdbcConnection
+        Dim cmd As OdbcCommand
+        Dim da As OdbcDataAdapter
+
+        conn = getODBCconnection("OCTA_TRAINING")
+        conn.Open()
+        da = New OdbcDataAdapter(sql, conn)
+        da.Fill(ds, tbl)
+        conn.Close()
+        Return ds
+    End Function
+
+    Private Sub btnSearchNow_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnSearchNow.Click
+        SearchNow()
+    End Sub
+
+'<SNIP>
+
+    Private Sub btnClear_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnClear.Click
+        txtKeyword.Text = ""
+        txtSection.Text = ""
+        txtStartDate.Text = ""
+        txtEndDate.Text = ""
+        ddCurriculum.SelectedIndex = 0
+        ddTargetStudent_Type.SelectedIndex = 0
+        Session("SelectedTargetStudent_Type") = Nothing
+        Session("SelectedCurriculum") = Nothing
+        Session("keyword") = Nothing
+        Session("Section") = Nothing
+        Session("StartDate") = Nothing
+        Session("endDate") = Nothing
+        Response.Redirect("catalog_Search.aspx")
+
+    End Sub
+
+    Private Sub HandleQueryString()
+        ' Purpose:  Process the QueryString to establish the values for the search fields
+        '           and then perform the search.  We have been providing preformatted
+        '           URLs so that potential students can directly pull up course info
+        '           that is currently being marketted.
+        '
+        ' NOTE:     TODO - we actually would prefer to loop through the QueryString and
+        '           determine which fields are being passed in.  This would allow us to
+        '           accept multiple search field values.
+        '           
+        '           TODO - We also need to do checking of the input values.  This should
+        '           actually be done by the SearchNow function (See comments there)
+        '--------------------------------------------------------------------------------
+        If Request.QueryString("action").ToString = "catalog_search" Then
+            Select Case Request.QueryString("search_type")
+                Case "curriculum"
+                   Me.ddCurriculum.SelectedIndex = Request.QueryString("value")
+                Case "student_type"
+                   Me.ddTargetStudent_Type.SelectedIndex = Request.QueryString("value")
+                Case "section_id"
+                   Me.txtSection.Text = Request.QueryString("value")
+                Case "keyword"
+                   Me.txtKeyword.Text = Request.QueryString("value")
+                Case "start_date"
+                   Me.txtStartDate.Text = Request.QueryString("value")
+                Case "end_date"
+                   Me.txtEndDate.Text = Request.QueryString("value")
+                Case Else
+            End Select
+
+            ' Now trigger the search
+            SearchNow()
+        End If
+    End Sub
+
+    Private Sub SearchNow()
+        ' Purpose:  Submit the query
+        ' NOTE:     TODO - 2007.09.11 Need to verify that class_display1 properly handles
+        '           the sCriteria value to prevent SQL injection attacks.
+        '--------------------------------------------------------------------------------
+        Dim sCriteria As String
+        Dim pString As String
+
+        sCriteria = ""
+
+        pString = "Search For "
+
+        ' build criteria string
+        If ddCurriculum.SelectedIndex <> 0 Then
+            sCriteria = sCriteria & " (ClassCur LIKE N'%" & ddCurriculum.SelectedItem.Value & "%')"
+            pString = pString & "<br>Curriculum = '" & ddCurriculum.SelectedItem.Text & "' AND"
+        End If
+
+        If ddTargetStudent_Type.SelectedIndex <> 0 Then
+            sCriteria = IIf(sCriteria <> "", sCriteria & " and ", "")
+            sCriteria = sCriteria & " (ClassStudType LIKE N'%" & Trim(ddTargetStudent_Type.SelectedItem.Value) & "%')"
+            pString = pString & "<br>Student = " & ddTargetStudent_Type.SelectedItem.Text & " AND "
+        End If
+
+        If txtKeyword.Text <> "" Then
+            sCriteria = IIf(sCriteria <> "", sCriteria & " and ", "")
+            sCriteria = sCriteria & " (ClassSKA LIKE N'%" & txtKeyword.Text.ToUpper & "%') OR " & _
+            "(ClassDesc LIKE N'%" & txtKeyword.Text.ToUpper & "%') OR " & _
+            "(ClassTitle LIKE N'%" & txtKeyword.Text.ToUpper & "%')"
+            pString = pString & "<br>KeyWord Type = " & txtKeyword.Text & " AND "
+        End If
+
+        If txtSection.Text <> "" Then
+            sCriteria = IIf(sCriteria <> "", sCriteria & " and ", "")
+            sCriteria = sCriteria & " (SectionNum like N'" & txtSection.Text.ToUpper & "%')"
+            pString = pString & "<br>Section = " & txtSection.Text & " AND"
+        End If
+
+        If txtStartDate.Text <> "" Then
+            sCriteria = IIf(sCriteria <> "", sCriteria & " and ", "")
+            sCriteria = sCriteria & " (dtSectionStart >= CONVERT(DATETIME, '" & DateValue(txtStartDate.Text) & "', 102)) "
+            pString = pString & "<br>Start Date on or after " & txtStartDate.Text & " AND "
+        End If
+
+        If txtEndDate.Text <> "" Then
+            sCriteria = IIf(sCriteria <> "", sCriteria & " and ", "")
+            sCriteria = sCriteria & " (dtSectionEnd <= CONVERT(DATETIME, '" & DateValue(txtEndDate.Text) & "', 102))"
+            pString = pString & "<br>Start Date before or on " & txtEndDate.Text & " AND "
+        End If
+
+        If pString.Length > 17 Then
+            pString = Mid(pString, 1, pString.Length - 4)
+        Else
+            pString = pString & "ALL"
+        End If
+
+        ' Update the display
+        class_display1.Criteria = sCriteria
+        class_display1.displayTitle = pString
+        class_display1.FindRecords()
+
+    End Sub
+End Class
